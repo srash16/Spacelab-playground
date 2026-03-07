@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FlameParticles, SmokeParticles } from './Particles';
@@ -15,36 +15,42 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
   const velocityRef = useRef<[number, number]>([0, 0]);
   const posRef = useRef<[number, number]>([0, 0]);
   const fuelRef = useRef(1);
+  const prevPhaseRef = useRef(state.phase);
 
-  // Reset refs when state resets
-  if (state.phase === 'idle') {
+  // Reset refs when state resets to idle
+  if (state.phase === 'idle' && prevPhaseRef.current !== 'idle') {
     velocityRef.current = [0, 0];
     posRef.current = [0, 0];
     fuelRef.current = 1;
   }
+  // Also reset when launching starts fresh
+  if (state.phase === 'launching' && prevPhaseRef.current === 'idle') {
+    velocityRef.current = [0, 0];
+    posRef.current = [0, 0];
+    fuelRef.current = 1;
+  }
+  prevPhaseRef.current = state.phase;
 
   useFrame((_, delta) => {
     if (!groupRef.current) return;
+
     if (state.phase !== 'launching' && state.phase !== 'coasting') {
-      // Position rocket at pad
       groupRef.current.position.set(0, 1.2, 0);
       groupRef.current.rotation.set(0, 0, 0);
       return;
     }
 
-    const dt = delta * 2; // speed up sim a bit
+    const dt = Math.min(delta, 0.05) * 2; // clamp delta, speed up sim
     const angleRad = (params.launchAngle * Math.PI) / 180;
     let [vx, vy] = velocityRef.current;
     let [px, py] = posRef.current;
     let fuel = fuelRef.current;
 
-    const totalMass = params.fuelMass + params.dryMass;
-
     if (fuel > 0 && state.phase === 'launching') {
       const currentMass = params.dryMass + fuel * params.fuelMass;
-      const thrustAcc = (params.thrustForce / (currentMass / totalMass));
-      vx += Math.sin(angleRad) * thrustAcc * dt * 0.008;
-      vy += Math.cos(angleRad) * thrustAcc * dt * 0.008;
+      const thrustAcc = params.thrustForce / currentMass;
+      vx += Math.sin(angleRad) * thrustAcc * dt * 0.5;
+      vy += Math.cos(angleRad) * thrustAcc * dt * 0.5;
       fuel -= dt / params.burnDuration;
 
       if (fuel <= 0) {
@@ -54,13 +60,13 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     }
 
     // Gravity
-    vy -= params.gravity * dt * 0.008;
+    vy -= params.gravity * dt * 0.01;
 
     // Drag
     const speed = Math.sqrt(vx * vx + vy * vy);
-    const atmosphereFactor = Math.max(0, 1 - py * 0.02) * params.atmosphericDensity;
-    const dragForce = 0.5 * params.dragCoefficient * atmosphereFactor * speed * speed * 0.005;
-    if (speed > 0) {
+    const atmosphereFactor = Math.max(0, 1 - py * 0.015) * params.atmosphericDensity;
+    const dragForce = 0.5 * params.dragCoefficient * atmosphereFactor * speed * speed * 0.003;
+    if (speed > 0.001) {
       vx -= (vx / speed) * dragForce * dt;
       vy -= (vy / speed) * dragForce * dt;
     }
@@ -72,33 +78,36 @@ const RocketModel = ({ params, state, onUpdateState }: RocketModelProps) => {
     posRef.current = [px, py];
     fuelRef.current = fuel;
 
-    // Check outcomes
-    if (py < 0 && state.elapsed > 0.5) {
+    // Check crash
+    if (py < 0 && (vx !== 0 || vy !== 0)) {
+      py = 0;
+      const maxAlt = Math.max(state.maxAltitude, py);
       onUpdateState((prev) => ({
         ...prev,
         phase: 'outcome',
-        outcome: prev.maxAltitude > 30 ? 'suborbital' : 'crashed',
+        outcome: prev.maxAltitude > 25 ? 'suborbital' : 'crashed',
         position: [px, 0, 0],
+        altitude: 0,
       }));
       return;
     }
 
-    // Escape
-    if (py > 60) {
+    // Escape / orbit detection
+    if (py > 50) {
       const totalSpeed = Math.sqrt(vx * vx + vy * vy);
-      const escapeVel = Math.sqrt(2 * params.gravity * 0.008 * params.planetRadius);
+      const escapeVel = 0.8;
       onUpdateState((prev) => ({
         ...prev,
         phase: 'outcome',
         outcome: totalSpeed > escapeVel ? 'escape' : 'orbiting',
+        position: [px, py, 0],
       }));
       return;
     }
 
     // Update visual position
     groupRef.current.position.set(px * 2, 1.2 + py * 2, 0);
-    // Tilt rocket in direction of velocity
-    const rocketAngle = Math.atan2(vx, vy);
+    const rocketAngle = Math.atan2(vx, Math.max(vy, 0.001));
     groupRef.current.rotation.set(0, 0, -rocketAngle);
 
     onUpdateState((prev) => ({

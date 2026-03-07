@@ -22,8 +22,6 @@ const Index = () => {
   ]);
   const [timeScale, setTimeScale] = useState(1);
   const [isPlaying, setIsPlaying] = useState(true);
-  const bodiesRef = useRef(bodies);
-  bodiesRef.current = bodies;
 
   // ─── Rocket state ───
   const [rocketParams, setRocketParams] = useState<RocketParams>(DEFAULT_PARAMS);
@@ -59,20 +57,19 @@ const Index = () => {
   }, []);
 
   const handleRocketReset = useCallback(() => {
-    setRocketState(INITIAL_STATE);
+    setRocketState({ ...INITIAL_STATE });
   }, []);
 
   const effectiveTimeScale = isPlaying ? timeScale : 0;
 
   return (
     <div className="w-full h-screen relative overflow-hidden bg-background">
-      {/* 3D Canvas */}
-      <div className="absolute inset-0">
-        {mode === 'spacetime' ? (
-          <SpaceScene bodies={bodies} timeScale={effectiveTimeScale} onUpdateBody={handleUpdateBody} />
-        ) : (
-          <RocketScene params={rocketParams} state={rocketState} onUpdateState={setRocketState} />
-        )}
+      {/* 3D Canvases - use visibility instead of conditional render to avoid WebGL context loss */}
+      <div className="absolute inset-0" style={{ display: mode === 'spacetime' ? 'block' : 'none' }}>
+        <SpaceScene bodies={bodies} timeScale={effectiveTimeScale} onUpdateBody={handleUpdateBody} />
+      </div>
+      <div className="absolute inset-0" style={{ display: mode === 'rocket' ? 'block' : 'none' }}>
+        <RocketScene params={rocketParams} state={rocketState} onUpdateState={setRocketState} />
       </div>
 
       {/* Top Bar */}
@@ -123,6 +120,7 @@ const Index = () => {
               <>
                 <div className="text-muted-foreground">Alt: <span className="text-primary">{rocketState.altitude.toFixed(1)}</span></div>
                 <div className="text-muted-foreground">Fuel: <span className="text-primary">{(rocketState.fuel * 100).toFixed(0)}%</span></div>
+                <div className="text-muted-foreground">Phase: <span className="text-primary capitalize">{rocketState.phase}</span></div>
               </>
             )}
           </div>
@@ -130,7 +128,7 @@ const Index = () => {
       </div>
 
       {/* Left Panel */}
-      <div className="absolute left-4 top-20 z-10 pointer-events-auto">
+      <div className="absolute left-4 top-20 bottom-20 z-10 pointer-events-auto">
         {mode === 'spacetime' ? (
           <ObjectLibrary onAddObject={handleAddObject} bodies={bodies} onRemoveAll={handleRemoveAll} />
         ) : (
